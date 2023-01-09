@@ -21,7 +21,7 @@
 
 
 from multi_select import MultiSelectOption, HeatmapScrolled
-from utils import PersonFilterEnum, MapTiles, HeatmapPlace
+from utils import MapTiles, HeatmapPlace
 import os
 from string import Template
 
@@ -33,12 +33,13 @@ from string import Template
 from gramps.gen.lib import EventType
 from gramps.gen.plug.report import Report, MenuReportOptions
 from gramps.gen.plug.menu import (
-    EnumeratedListOption, PersonOption,
+    EnumeratedListOption, PersonOption, FilterOption,
     DestinationOption, StringOption, NumberOption, BooleanOption)
-from gramps.gen.filters import CustomFilters, GenericFilterFactory, rules
 from gramps.gen.plug.docgen import ParagraphStyle
 from gramps.gen.plug import BasePluginManager
 from gramps.gui.dialog import ErrorDialog
+from gramps.gen.plug.report import utils
+from gramps.gen.plug.report import stdoptions
 from gramps.gen.utils.place import conv_lat_lon
 from gramps.gen.const import GRAMPS_LOCALE as glocale
 try:
@@ -57,10 +58,10 @@ class ReportOptions(MenuReportOptions):
     """Heatmap options class."""
 
     def __init__(self, name, dbase):
+        self.db = dbase
         pmgr = BasePluginManager.get_instance()
         pmgr.register_option(MultiSelectOption, HeatmapScrolled)
         MenuReportOptions.__init__(self, name, dbase)
-        self.db = dbase
 
     def add_menu_options(self, menu):
         """Create menu options."""
@@ -68,13 +69,17 @@ class ReportOptions(MenuReportOptions):
         # -------------------
         # GENERAL options tab
         # -------------------
-        self.get_person_filters(menu)
-        fltr = EnumeratedListOption(_("Filter"), 0)
-        fltr.set_items(menu.filter_list)
-        menu.add_option(_("General"), "fltr", fltr)
+        self.filter = FilterOption(_("Filter"), 0)
+        menu.add_option(_("General"), "fltr", self.filter)
+        self.filter.connect('value-changed', self.filter_changed)
 
-        pers_id = PersonOption(_("Person"))
-        menu.add_option(_("General"), "pers_id", pers_id)
+        self.pid = PersonOption(_("Filter Person"))
+        menu.add_option(_("General"), "pid", self.pid)
+        self.pid.connect('value-changed', self.update_filters)
+
+        self.nf = stdoptions.add_name_format_option(menu, _("General"))
+        self.nf.connect('value-changed', self.update_filters)
+        self.update_filters()
 
         map_tiles_list = [(x[0], x[1]) for x in MapTiles._DATAMAP]
         tiles = EnumeratedListOption(_("Map tiles"), 0)
@@ -141,20 +146,22 @@ class ReportOptions(MenuReportOptions):
             self.start_lat.set_available(True)
             self.start_lon.set_available(True)
 
-    @staticmethod
-    def get_person_filters(menu):
-        """Get menu option filter list of generic and custom filters."""
-        custom = CustomFilters.get_filters("Person")
-        menu.filter_list = [
-            (PersonFilterEnum.ALL, _("Entire Database")),
-            (PersonFilterEnum.ANCESTORS,
-             _("Ancestors of <selected person>")),
-            (PersonFilterEnum.DESCENDANTS,
-             _("Descendants of <selected person>")),
-            (PersonFilterEnum.SINGLE, _("Single Person"))]
+    def update_filters(self):
+        """Update the filter list based on selected person"""
+        gid = self.pid.get_value()
+        person = self.db.get_person_from_gramps_id(gid)
+        nfv = self.nf.get_value()
+        filter_list = utils.get_person_filters(
+            person, include_single=False, name_format=nfv)
+        self.filter.set_filters(filter_list)
 
-        for item in enumerate([filtr.get_name() for filtr in custom], start=4):
-            menu.filter_list.append(item)
+    def filter_changed(self):
+        """Handle filter change."""
+        filter_value = self.filter.get_value()
+        if filter_value == 1:
+            self.pid.set_available(False)
+        else:
+            self.pid.set_available(True)
 
     @staticmethod
     def make_default_style(default_style):
@@ -183,8 +190,13 @@ class ReportClass(Report):
             return  # Stop if incorrect path or filename
 
         iter_persons = self.db.iter_person_handles()
-        fltr = self.get_filter(self.opt["fltr"], self.opt["pers_id"])
-        person_handles = fltr.apply(self.db, iter_persons)
+        filter_option = options.menu.get_option_by_name('fltr')
+        self.fltr = filter_option.get_filter()
+
+        if not self.fltr:
+            return # Stop if no filter found
+
+        person_handles = self.fltr.apply(self.db, iter_persons, user=self.user)
         for person_h in person_handles:
             events = self.get_events(person_h)
             if len(events) > 0 and any(events):
@@ -216,23 +228,6 @@ class ReportClass(Report):
         if name != "" and name[0].isalnum() and name[-1].isalnum():
             self.filename = path + "/" + name + ".html"
             return True
-
-    @staticmethod
-    def get_filter(index, pers_id):
-        """Create and return the filter object selected in menu options."""
-        fltr = GenericFilterFactory("Person")()
-        custom = enumerate(CustomFilters.get_filters("Person"), start=2)
-        if index == PersonFilterEnum.ALL:
-            fltr.add_rule(rules.person.Everyone([pers_id, True]))
-        elif index == PersonFilterEnum.ANCESTORS:
-            fltr.add_rule(rules.person.IsAncestorOf([pers_id, True]))
-        elif index == PersonFilterEnum.DESCENDANTS:
-            fltr.add_rule(rules.person.IsDescendantOf([pers_id, True]))
-        elif index == PersonFilterEnum.SINGLE:
-            fltr.add_rule(rules.person.HasIdOf([pers_id, True]))
-        else:
-            fltr = [item[1] for item in list(custom) if item[0] == index][0]
-        return fltr
 
     def get_events(self, person_h):
         """Get all relevant events of a person."""

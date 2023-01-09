@@ -72,20 +72,6 @@ class MapTiles:
          "\u0026copy; \u003ca href=\"http://www.openstreetmap.org/copyright\"\u003eOpenStreetMap\u003c/a\u003e contributors \u0026copy; \u003ca href=\"http://cartodb.com/attributions\"\u003eCartoDB\u003c/a\u003e, CartoDB \u003ca href =\"http://cartodb.com/attributions\"\u003eattributions\u003c/a\u003e")
     ]
 
-# ------------------------------------------------------------------------
-#
-# PersonFilterEnum Class
-#
-# ------------------------------------------------------------------------
-
-
-class PersonFilterEnum:
-    """Class for enum like constants."""
-    ALL = 0
-    ANCESTORS = 1
-    DESCENDANTS = 2
-    SINGLE = 3
-
 
 # ------------------------------------------------------------------------
 #
